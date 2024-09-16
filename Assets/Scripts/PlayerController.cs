@@ -1,108 +1,94 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class PlayerController : MonoBehaviour
 {
-    public float moveSpeed = 5f;           // Speed at which the player moves
-    public float rotationSpeed = 100f;     // Speed at which the player rotates
-    public float jumpHeight = 2f;          // How high the player can jump
-    public float gravity = -9.81f;         // Gravity strength
-    public float groundCheckDistance = 0.6f;  // Distance to check for ground
+    [Header("Player Settings")]
+    public float walkSpeed = 5f;
+    public float runSpeed = 8f;
+    public float jumpForce = 8f;
+    public float gravity = -9.81f;
 
-    private CharacterController controller; // Reference to the CharacterController component
-    private Animator animator;              // Reference to the Animator component
-    private Vector3 velocity;               // Used for handling gravity and vertical movement
-    private bool isGrounded;                // Checks if the player is grounded
+    [Header("Ground Check Settings")]
+    public float groundDistance = 0.4f;
+    public LayerMask groundMask;
+    private CharacterController controller;
+    private Vector3 velocity;
+    private bool isGrounded;
+    public Transform cam;
+    private Animator animator;
+    public float turnSmoothTime = 0.1f;
+    private float turnSmoothVelocity;
+
+    private bool isIdle = false;
 
     void Start()
     {
-        // Get the CharacterController and Animator components
         controller = GetComponent<CharacterController>();
         animator = GetComponent<Animator>();
     }
 
     void Update()
     {
-        // Check if the player is grounded using a raycast
-        CheckGrounded();
+        RaycastHit hit;
+        isGrounded = Physics.Raycast(transform.position, Vector3.down, out hit, groundDistance + 0.1f, groundMask);
 
-        // Update grounded state in Animator
-        
+        if (isGrounded && velocity.y < 0)
+        {
+            velocity.y = -2f;
+        }
 
-        // Handle movement and animation update
-        HandleMovement();
+        HandleMovementAndAnimations();
 
-        // Handle jumping
-        HandleJumping();
+        if (Input.GetButtonDown("Jump") && isGrounded)
+        {
+            velocity.y = Mathf.Sqrt(jumpForce * -2f * gravity);
+        }
 
-        // Apply gravity over time
         velocity.y += gravity * Time.deltaTime;
-
-        // Apply vertical velocity (including gravity) to the player
         controller.Move(velocity * Time.deltaTime);
     }
 
-    private void CheckGrounded()
+    void HandleMovementAndAnimations()
     {
-        // Raycast downwards to check if the player is on the ground
-        RaycastHit hit;
-        if (Physics.Raycast(transform.position, Vector3.down, out hit, groundCheckDistance))
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
+        Vector3 direction = new Vector3(horizontal, 0f, vertical).normalized;
+
+        if (direction.magnitude >= 0.1f)
         {
-            isGrounded = true;
+            float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg + cam.eulerAngles.y;
+
+            if (Mathf.Abs(horizontal) > 0 && vertical == 0)
+            {
+                float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
+                transform.rotation = Quaternion.Euler(0f, angle, 0f);
+            }
+
+            Vector3 moveDirection = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
+            if (Input.GetKey(KeyCode.S))
+            {
+                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.back;
+            }
+            else if (Input.GetKey(KeyCode.W))
+            {
+                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.forward;
+            }
+
+            controller.Move(moveDirection.normalized * (vertical != 0 ? walkSpeed : walkSpeed) * Time.deltaTime);
+            animator.SetFloat("Speed", 1.0f);
+            isIdle = false;
         }
         else
         {
-            isGrounded = false;
-            animator.SetTrigger("Idle");
-        }
-
-        animator.SetBool("IsGrounded", isGrounded);
-    }
-
-    private void HandleMovement()
-    {
-        // Get player input for forward/backward movement (W/S) and side rotation (A/D)
-        float moveZ = Input.GetAxis("Vertical");    // W (forward) and S (backward)
-        float rotateX = Input.GetAxis("Horizontal"); // A (rotate left) and D (rotate right)
-
-        // Handle player rotation
-        if (rotateX != 0)
-        {
-            transform.Rotate(Vector3.up, rotateX * rotationSpeed * Time.deltaTime);
-        }
-
-        // Create movement vector and apply it
-        Vector3 move = transform.forward * moveZ;
-        controller.Move(move * moveSpeed * Time.deltaTime);
-
-        // Update the animator parameters for movement (if moving)
-        if (moveZ != 0)
-        {
-            animator.SetFloat("Speed", Mathf.Abs(moveZ));  // Set the Speed parameter in the Animator
-        }
-        else
-        {
-            // Set speed to 0 when not moving
             animator.SetFloat("Speed", 0f);
-        }
-    }
 
-    private void HandleJumping()
-    {
-        // Handle jumping logic
-        if (Input.GetButtonDown("Jump") && isGrounded)
-        {
-            // Set the vertical velocity for jumping
-            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-
-            // Trigger the jump animation
-            animator.SetBool("IsGrounded", isGrounded);
+            if (!isIdle && isGrounded)
+            {
+                animator.SetTrigger("Idle");
+                isIdle = true;
+            }
         }
-
-        // Apply gravity while in the air
-        if (!isGrounded)
-        {
-            velocity.y += gravity * Time.deltaTime;
-            animator.SetTrigger("Idle");
-        }
+        animator.SetBool("IsGrounded", isGrounded);
     }
 }
