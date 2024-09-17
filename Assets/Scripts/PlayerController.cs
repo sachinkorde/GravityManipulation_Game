@@ -1,100 +1,101 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class PlayerController : MonoBehaviour
 {
-    public float moveSpeed = 5f;
-    public float turnSpeed = 10f;
-    public float jumpForce = 7f;  // Jump force
-    public Animator animator;      // Reference to the Animator component
-    public LayerMask groundLayer;  // LayerMask for detecting ground
+    private PlayerControls playerControls; // Reference to the auto-generated PlayerControls class
+    private CharacterController characterController; // Reference to Unity's CharacterController component
+    private Animator animator;
 
-    private Vector3 moveDirection;
-    private Rigidbody rb;
-    private bool isGrounded = true; // To check if the player is on the ground
+    [SerializeField]
+    private float moveSpeed = 5f;
+    [SerializeField]
+    private float jumpHeight = 2f;
+    [SerializeField]
+    private float gravity = -9.81f;
+    [SerializeField]
+    private Transform cameraTransform; // Reference to the camera
 
-    private void Start()
+    private Vector3 velocity; // Stores the velocity for jumping and falling
+    private bool isGrounded; // Tracks if the player is on the ground
+
+    private void Awake()
     {
-        rb = GetComponent<Rigidbody>(); // Reference to the Rigidbody component
+        playerControls = new PlayerControls(); // Initialize the PlayerControls
+        characterController = GetComponent<CharacterController>(); // Get the CharacterController component
+        animator = GetComponent<Animator>();
+    }
+
+    private void OnEnable()
+    {
+        playerControls.Player.Enable(); // Enable the input actions when the script is active
+    }
+
+    private void OnDisable()
+    {
+        playerControls.Player.Disable(); // Disable the input actions when the script is inactive
     }
 
     private void Update()
     {
         HandleMovement();
-        HandleRotation();
-        HandleAnimation();
-
-        // Handle jump input
-        if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
-        {
-            Jump();
-        }
+        HandleJump();
+        ApplyGravity();
     }
 
     private void HandleMovement()
     {
-        moveDirection = Vector3.zero; // Reset the move direction
+        // Read movement input from the PlayerControls
+        Vector2 input = playerControls.Player.Move.ReadValue<Vector2>();
 
-        // Check for WASD keys and add the respective direction
-        if (Input.GetKey(KeyCode.W)) // Forward
-        {
-            moveDirection += transform.forward;
-        }
-        if (Input.GetKey(KeyCode.S)) // Backward
-        {
-            moveDirection -= transform.forward;
-        }
-        if (Input.GetKey(KeyCode.A)) // Left
-        {
-            moveDirection -= transform.right;
-        }
-        if (Input.GetKey(KeyCode.D)) // Right
-        {
-            moveDirection += transform.right;
-        }
+        // Convert input into a 3D movement vector based on the camera's orientation
+        Vector3 move = new Vector3(input.x, 0, input.y);
+        move = cameraTransform.forward * move.z + cameraTransform.right * move.x;
+        move.y = 0; // Keep movement on the ground level
 
-        // Normalize the movement direction
-        moveDirection.Normalize();
-
-        // Smoothly move the player
-        if (moveDirection.magnitude > 0.1f)
-        {
-            rb.MovePosition(rb.position + moveDirection * moveSpeed * Time.deltaTime);
-        }
+        // Move the character using the CharacterController component
+        characterController.Move(move * moveSpeed * Time.deltaTime);
+        animator.SetFloat("Speed", move.x);
     }
 
-    private void HandleRotation()
-    {
-        if (moveDirection.magnitude > 0.1f)
-        {
-            // Calculate the rotation to face the movement direction
-            Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
-            // Smoothly rotate the player
-            rb.rotation = Quaternion.Slerp(transform.rotation, targetRotation, turnSpeed * Time.deltaTime);
-        }
-    }
-
-    private void HandleAnimation()
-    {
-        // Set the Speed parameter in the Animator based on the magnitude of movement
-        animator.SetFloat("Speed", moveDirection.magnitude);
-
-        // Set the Jump parameter when jumping
-        animator.SetBool("IsGrounded", isGrounded);
-    }
-
-    private void Jump()
-    {
-        isGrounded = false;
-        rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse); // Apply an upward force for jumping
-        animator.SetTrigger("Jump"); // Trigger jump animation
-    }
-
-    private void OnCollisionEnter(Collision collision)
+    private void HandleJump()
     {
         // Check if the player is on the ground
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Ground"))
+        isGrounded = characterController.isGrounded;
+
+        if (isGrounded && velocity.y < 0)
         {
-            isGrounded = true;
+            velocity.y = -2f; // Small negative value to keep the character grounded
         }
+
+        // Check if the Jump button is pressed and if the player is grounded
+        if (playerControls.Player.Jump.triggered && isGrounded)
+        {
+            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity); // Calculate the jump velocity
+            animator.SetBool("IsGrounded", isGrounded);
+        }
+    }
+
+    private void ApplyGravity()
+    {
+        // Apply gravity to the character's velocity
+        velocity.y += gravity * Time.deltaTime;
+        characterController.Move(velocity * Time.deltaTime);
+        animator.SetFloat("Speed", velocity.x);
+    }
+
+    private void LateUpdate()
+    {
+        HandleLook();
+    }
+
+    private void HandleLook()
+    {
+        // Get mouse delta input from the PlayerControls
+        Vector2 lookInput = playerControls.Player.Look.ReadValue<Vector2>();
+
+        // Apply the look input to the camera's rotation
+        cameraTransform.Rotate(Vector3.up, lookInput.x * Time.deltaTime); // Horizontal rotation
+        cameraTransform.Rotate(Vector3.left, lookInput.y * Time.deltaTime); // Vertical rotation
     }
 }
