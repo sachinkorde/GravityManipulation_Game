@@ -1,94 +1,100 @@
 using UnityEngine;
-using UnityEngine.EventSystems;
 
 public class PlayerController : MonoBehaviour
 {
-    [Header("Player Settings")]
-    public float walkSpeed = 5f;
-    public float runSpeed = 8f;
-    public float jumpForce = 8f;
-    public float gravity = -9.81f;
+    public float moveSpeed = 5f;
+    public float turnSpeed = 10f;
+    public float jumpForce = 7f;  // Jump force
+    public Animator animator;      // Reference to the Animator component
+    public LayerMask groundLayer;  // LayerMask for detecting ground
 
-    [Header("Ground Check Settings")]
-    public float groundDistance = 0.4f;
-    public LayerMask groundMask;
-    private CharacterController controller;
-    private Vector3 velocity;
-    private bool isGrounded;
-    public Transform cam;
-    private Animator animator;
-    public float turnSmoothTime = 0.1f;
-    private float turnSmoothVelocity;
+    private Vector3 moveDirection;
+    private Rigidbody rb;
+    private bool isGrounded = true; // To check if the player is on the ground
 
-    private bool isIdle = false;
-
-    void Start()
+    private void Start()
     {
-        controller = GetComponent<CharacterController>();
-        animator = GetComponent<Animator>();
+        rb = GetComponent<Rigidbody>(); // Reference to the Rigidbody component
     }
 
-    void Update()
+    private void Update()
     {
-        RaycastHit hit;
-        isGrounded = Physics.Raycast(transform.position, Vector3.down, out hit, groundDistance + 0.1f, groundMask);
+        HandleMovement();
+        HandleRotation();
+        HandleAnimation();
 
-        if (isGrounded && velocity.y < 0)
+        // Handle jump input
+        if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
         {
-            velocity.y = -2f;
+            Jump();
         }
-
-        HandleMovementAndAnimations();
-
-        if (Input.GetButtonDown("Jump") && isGrounded)
-        {
-            velocity.y = Mathf.Sqrt(jumpForce * -2f * gravity);
-        }
-
-        velocity.y += gravity * Time.deltaTime;
-        controller.Move(velocity * Time.deltaTime);
     }
 
-    void HandleMovementAndAnimations()
+    private void HandleMovement()
     {
-        float horizontal = Input.GetAxisRaw("Horizontal");
-        float vertical = Input.GetAxisRaw("Vertical");
-        Vector3 direction = new Vector3(horizontal, 0f, vertical).normalized;
+        moveDirection = Vector3.zero; // Reset the move direction
 
-        if (direction.magnitude >= 0.1f)
+        // Check for WASD keys and add the respective direction
+        if (Input.GetKey(KeyCode.W)) // Forward
         {
-            float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg + cam.eulerAngles.y;
-
-            if (Mathf.Abs(horizontal) > 0 && vertical == 0)
-            {
-                float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
-                transform.rotation = Quaternion.Euler(0f, angle, 0f);
-            }
-
-            Vector3 moveDirection = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
-            if (Input.GetKey(KeyCode.S))
-            {
-                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.back;
-            }
-            else if (Input.GetKey(KeyCode.W))
-            {
-                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.forward;
-            }
-
-            controller.Move(moveDirection.normalized * (vertical != 0 ? walkSpeed : walkSpeed) * Time.deltaTime);
-            animator.SetFloat("Speed", 1.0f);
-            isIdle = false;
+            moveDirection += transform.forward;
         }
-        else
+        if (Input.GetKey(KeyCode.S)) // Backward
         {
-            animator.SetFloat("Speed", 0f);
-
-            if (!isIdle && isGrounded)
-            {
-                animator.SetTrigger("Idle");
-                isIdle = true;
-            }
+            moveDirection -= transform.forward;
         }
+        if (Input.GetKey(KeyCode.A)) // Left
+        {
+            moveDirection -= transform.right;
+        }
+        if (Input.GetKey(KeyCode.D)) // Right
+        {
+            moveDirection += transform.right;
+        }
+
+        // Normalize the movement direction
+        moveDirection.Normalize();
+
+        // Smoothly move the player
+        if (moveDirection.magnitude > 0.1f)
+        {
+            rb.MovePosition(rb.position + moveDirection * moveSpeed * Time.deltaTime);
+        }
+    }
+
+    private void HandleRotation()
+    {
+        if (moveDirection.magnitude > 0.1f)
+        {
+            // Calculate the rotation to face the movement direction
+            Quaternion targetRotation = Quaternion.LookRotation(moveDirection);
+            // Smoothly rotate the player
+            rb.rotation = Quaternion.Slerp(transform.rotation, targetRotation, turnSpeed * Time.deltaTime);
+        }
+    }
+
+    private void HandleAnimation()
+    {
+        // Set the Speed parameter in the Animator based on the magnitude of movement
+        animator.SetFloat("Speed", moveDirection.magnitude);
+
+        // Set the Jump parameter when jumping
         animator.SetBool("IsGrounded", isGrounded);
+    }
+
+    private void Jump()
+    {
+        isGrounded = false;
+        rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse); // Apply an upward force for jumping
+        animator.SetTrigger("Jump"); // Trigger jump animation
+    }
+
+    private void OnCollisionEnter(Collision collision)
+    {
+        // Check if the player is on the ground
+        if (collision.gameObject.layer == LayerMask.NameToLayer("Ground"))
+        {
+            isGrounded = true;
+        }
     }
 }
