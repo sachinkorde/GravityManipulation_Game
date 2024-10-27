@@ -1,101 +1,118 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 
 public class PlayerController : MonoBehaviour
 {
-    private PlayerControls playerControls; // Reference to the auto-generated PlayerControls class
-    private CharacterController characterController; // Reference to Unity's CharacterController component
+    [Header("Player Settings")]
+    public float walkSpeed = 5f;
+    public float runSpeed = 8f;
+    public float jumpForce = 8f;
+    public float gravity = -9.81f;
+
+    [Header("Ground Check Settings")]
+    public float groundDistance = 0.4f; // Distance to consider as grounded
+    public LayerMask groundMask; // Ground layers to collide with
+
+    private CharacterController controller;
+    private Vector3 velocity;
+    private bool isGrounded;
+
+    // Reference to the camera
+    //public Transform cam;
+
+    // Animator for the player animations
     private Animator animator;
 
-    [SerializeField]
-    private float moveSpeed = 5f;
-    [SerializeField]
-    private float jumpHeight = 2f;
-    [SerializeField]
-    private float gravity = -9.81f;
-    [SerializeField]
-    private Transform cameraTransform; // Reference to the camera
+    // Variables for smooth rotation
+    public float turnSmoothTime = 0.1f;
+    private float turnSmoothVelocity;
 
-    private Vector3 velocity; // Stores the velocity for jumping and falling
-    private bool isGrounded; // Tracks if the player is on the ground
+    // To cache previous states to avoid redundant calls
+    private bool isIdle = false;
 
-    private void Awake()
+    void Start()
     {
-        playerControls = new PlayerControls(); // Initialize the PlayerControls
-        characterController = GetComponent<CharacterController>(); // Get the CharacterController component
-        animator = GetComponent<Animator>();
+        // Get the character controller and animator component
+        controller = GetComponent<CharacterController>();
+        animator = GetComponent<Animator>(); // Make sure the Animator is attached to the player object
     }
 
-    private void OnEnable()
+    void Update()
     {
-        playerControls.Player.Enable(); // Enable the input actions when the script is active
-    }
-
-    private void OnDisable()
-    {
-        playerControls.Player.Disable(); // Disable the input actions when the script is inactive
-    }
-
-    private void Update()
-    {
-        HandleMovement();
-        HandleJump();
-        ApplyGravity();
-    }
-
-    private void HandleMovement()
-    {
-        // Read movement input from the PlayerControls
-        Vector2 input = playerControls.Player.Move.ReadValue<Vector2>();
-
-        // Convert input into a 3D movement vector based on the camera's orientation
-        Vector3 move = new Vector3(input.x, 0, input.y);
-        move = cameraTransform.forward * move.z + cameraTransform.right * move.x;
-        move.y = 0; // Keep movement on the ground level
-
-        // Move the character using the CharacterController component
-        characterController.Move(move * moveSpeed * Time.deltaTime);
-        animator.SetFloat("Speed", move.x);
-    }
-
-    private void HandleJump()
-    {
-        // Check if the player is on the ground
-        isGrounded = characterController.isGrounded;
+        // Ground Check using Raycast
+        RaycastHit hit;
+        isGrounded = Physics.Raycast(transform.position, Vector3.down, out hit, groundDistance + 0.1f, groundMask);
 
         if (isGrounded && velocity.y < 0)
         {
-            velocity.y = -2f; // Small negative value to keep the character grounded
+            velocity.y = -2f; // Small negative value to keep player grounded
         }
 
-        // Check if the Jump button is pressed and if the player is grounded
-        if (playerControls.Player.Jump.triggered && isGrounded)
+        // Handle animations and movement
+        HandleMovementAndAnimations();
+
+        // Jumping
+        if (Input.GetButtonDown("Jump") && isGrounded)
         {
-            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity); // Calculate the jump velocity
-            animator.SetBool("IsGrounded", isGrounded);
+            velocity.y = Mathf.Sqrt(jumpForce * -2f * gravity);
         }
-    }
 
-    private void ApplyGravity()
-    {
-        // Apply gravity to the character's velocity
+        // Apply gravity
         velocity.y += gravity * Time.deltaTime;
-        characterController.Move(velocity * Time.deltaTime);
-        animator.SetFloat("Speed", velocity.x);
+        controller.Move(velocity * Time.deltaTime);
     }
 
-    private void LateUpdate()
+    // Handle animations and movement together to optimize the control flow
+    void HandleMovementAndAnimations()
     {
-        HandleLook();
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
+        Vector3 direction = new Vector3(horizontal, 0f, vertical).normalized;
+
+        if (direction.magnitude >= 0.1f)
+        {
+            // Calculate target angle and smoothly rotate the player towards that direction
+            float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg; // + cam.eulerAngles.y;
+
+            // Check for strafing left or right only for rotation
+            if (Mathf.Abs(horizontal) > 0 && vertical == 0)
+            {
+                float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
+                transform.rotation = Quaternion.Euler(0f, angle, 0f);
+            }
+
+            // Move in the direction the player is currently facing
+            Vector3 moveDirection = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
+            if (Input.GetKey(KeyCode.S))
+            {
+                // Move backwards without changing the orientation
+                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.back;
+            }
+            else if (Input.GetKey(KeyCode.W))
+            {
+                // Move forwards without changing the orientation
+                moveDirection = Quaternion.Euler(0f, transform.eulerAngles.y, 0f) * Vector3.forward;
+            }
+
+            controller.Move(moveDirection.normalized * (vertical != 0 ? walkSpeed : walkSpeed) * Time.deltaTime);
+            animator.SetFloat("Speed", 1.0f); // Assuming 1 is the speed for walking/running
+            isIdle = false;
+        }
+        else
+        {
+            // Set speed to zero when not moving
+            animator.SetFloat("Speed", 0f);
+
+            // If the player is grounded and not moving, set idle trigger
+            if (!isIdle && isGrounded)
+            {
+                animator.SetTrigger("Idle");
+                isIdle = true; // Set idle only once to avoid spamming the trigger
+            }
+        }
+
+        // Update the animator with grounded status
+        animator.SetBool("IsGrounded", isGrounded);
     }
 
-    private void HandleLook()
-    {
-        // Get mouse delta input from the PlayerControls
-        Vector2 lookInput = playerControls.Player.Look.ReadValue<Vector2>();
-
-        // Apply the look input to the camera's rotation
-        cameraTransform.Rotate(Vector3.up, lookInput.x * Time.deltaTime); // Horizontal rotation
-        cameraTransform.Rotate(Vector3.left, lookInput.y * Time.deltaTime); // Vertical rotation
-    }
 }
